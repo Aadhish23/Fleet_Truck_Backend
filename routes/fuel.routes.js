@@ -1,8 +1,12 @@
+// BACKEND/routes/fuel.routes.js
 const express = require('express');
 const router = express.Router();
-const { updateFuelLevel, getFuelStats } = require('../controllers/fuel.controller');
+const { addFuelLog, getFuelSummary } = require('../controllers/fuel.controller');
 
-router.post('/update', updateFuelLevel);
-router.get('/:truckId', getFuelStats);
+// POST - add a fuel log manually
+router.post('/', addFuelLog);
+
+// GET - get data for charts
+router.get('/summary', getFuelSummary);
 
 module.exports = router;

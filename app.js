@@ -31,14 +31,17 @@ app.use((req, res, next) => {
   next();
 });
 app.use('/api/gps', require('./routes/gps.routes'));
-app.use('/api/fuel', require('./routes/fuel.routes'));
 app.use('/api/driver', require('./routes/driver.routes'));
 app.use('/api/alerts', require('./routes/alerts.routes'));
 app.use('/api/routes', require('./routes/routes.routes'));
 app.use('/api/chat', require('./routes/chatbot.routes'));
 app.use('/api/trucks', require('./routes/trucks.routes'));
-app.use('/api/auth', require('./routes/auth.routes')); // ✅ Inline require — no need for separate const
+app.use('/api/auth', require('./routes/auth.routes')); 
 app.use('/api/test', require('./routes/test.routes'));
+
+const fuelRoutes = require('./routes/fuel.routes');
+
+app.use('/api/fuel', fuelRoutes);
 
 // Test route
 app.get('/api/gps/test', (req, res) => {

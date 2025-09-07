@@ -1,43 +1,93 @@
+// BACKEND/controllers/fuel.controller.js
 const FuelLog = require('../models/FuelLog');
-const Truck = require('../models/Truck');
-const { sendAlertEmail } = require('../utils/mailer');
 
-exports.updateFuelLevel = async (req, res) => {
-  const { truckId, level } = req.body;
-
+// Add new fuel log
+exports.addFuelLog = async (req, res) => {
   try {
-    const previousLog = await FuelLog.findOne({ truckId }).sort({ timestamp: -1 });
-    const leakDetected = previousLog && previousLog.level - level > 20; // sudden drop
+    const { truckId, fuelAmount, fuelLevelPercentage, date } = req.body;
 
-    const fuelLog = new FuelLog({ truckId, level, leakDetected });
-    await fuelLog.save();
-
-    await Truck.findOneAndUpdate({ truckId }, { fuelLevel: level }, { new: true });
-
-    if (leakDetected) {
-      await createAlert(
-        truckId,
-        null,
-        'fuel_theft',
-        'critical',
-        `🚨 Fuel theft detected on Truck ${truckId}! Sudden drop from ${previousLog.level}% to ${level}%`
-      );
-      await sendAlertEmail('Fuel Theft Alert', `Fuel theft suspected on Truck ${truckId}`);
+    // Validate input
+    if (!truckId || !fuelAmount || fuelLevelPercentage == null) {
+      return res.status(400).json({ message: "All fields are required" });
     }
 
-    res.status(201).json({ success: true, data: fuelLog });
+    // Create new fuel log
+    const newLog = await FuelLog.create({
+      truckId,
+      fuelAmount,
+      fuelLevelPercentage,
+      date: date ? new Date(date) : new Date() // Use provided date or default to now
+    });
+
+    res.status(201).json(newLog);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("❌ Error adding fuel log:", err);
+    res.status(500).json({ message: "Server error while adding fuel log" });
   }
 };
 
-exports.getFuelStats = async (req, res) => {
-  const { truckId } = req.params;
+// Get weekly consumption and fleet levels
+exports.getFuelSummary = async (req, res) => {
   try {
-    const logs = await FuelLog.find({ truckId }).sort({ timestamp: -1 }).limit(10);
-    if (!logs.length) return res.status(404).json({ success: false, message: 'No fuel data' });
-    res.json({ success: true, data: logs });
+    const today = new Date();
+
+    // Start of the current week (Sunday 00:00 UTC)
+    const startOfWeek = new Date(today);
+    startOfWeek.setUTCHours(0, 0, 0, 0);
+    startOfWeek.setUTCDate(today.getUTCDate() - today.getUTCDay());
+
+    console.log("📅 Start of week:", startOfWeek);
+
+    // Weekly consumption grouped by truck and day of the week
+    const weeklyConsumption = await FuelLog.aggregate([
+      {
+        $match: {
+          date: { $gte: startOfWeek } // Last 7 days
+        }
+      },
+      {
+        $group: {
+          _id: {
+            day: { $dayOfWeek: "$date" }, // 1 = Sunday, 7 = Saturday
+            truckId: "$truckId"          // Group by truck
+          },
+          totalFuel: { $sum: "$fuelAmount" }
+        }
+      },
+      { $sort: { "_id.day": 1 } }
+    ]);
+
+    // Fleet fuel levels summary
+    const fleetLevels = await FuelLog.aggregate([
+      {
+        $group: {
+          _id: null,
+          good: {
+            $sum: { $cond: [{ $gte: ["$fuelLevelPercentage", 80] }, 1, 0] }
+          },
+          medium: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ["$fuelLevelPercentage", 50] }, { $lt: ["$fuelLevelPercentage", 80] }] },
+                1,
+                0
+              ]
+            }
+          },
+          low: {
+            $sum: { $cond: [{ $lt: ["$fuelLevelPercentage", 50] }, 1, 0] }
+          },
+          total: { $sum: 1 }
+        }
+      }
+    ]);
+
+    res.json({
+      weeklyConsumption,
+      fleetLevels: fleetLevels[0] || { good: 0, medium: 0, low: 0, total: 0 }
+    });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("❌ Error fetching summary:", err);
+    res.status(500).json({ message: "Server error fetching summary" });
   }
 };
